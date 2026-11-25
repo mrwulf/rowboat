@@ -7,6 +7,7 @@ export { Worker, type WorkerOptions } from './worker.js';
 export { HarborClient, HarborLive, HarborRequestError, type HarborLiveOptions } from './harbor.js';
 export { ThreadState, type ThreadRecord } from './state.js';
 export { CodexRuntime, activityOf, type CodexRuntimeOptions } from './codex/runtime.js';
+export { ClaudeRuntime, eventsOf, type ClaudeRuntimeOptions } from './claude/runtime.js';
 export { AppServer, AppServerError, type AppServerHandlers, type AppServerOptions } from './codex/app-server.js';
 export { TurnOverError, type ModelChoice, type OpenSessionInput, type Runtime, type TurnEvent, type TurnHandle, type TurnInput, type TurnResult } from './runtime.js';
 export { requestPrompt, steerText, continuation } from './prompt.js';

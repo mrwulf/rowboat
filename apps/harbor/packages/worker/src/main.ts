@@ -2,17 +2,22 @@
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { ClaudeRuntime } from './claude/runtime.js';
 import { CodexRuntime } from './codex/runtime.js';
 import { errorText, makeLogger } from './log.js';
+import type { Runtime } from './runtime.js';
 import { ThreadState } from './state.js';
 import { Worker } from './worker.js';
 
 // The command: `rowboat-worker --url https://org.example --agent codex --cwd /data/workspace --state /data/rowboat/worker [--idle 600]`.
 // The key comes from ROWBOAT_AGENT_KEY or --key-file, and is never written anywhere by the worker.
 
-const USAGE = `usage: rowboat-worker --url <harbor-url> [--agent codex] [--cwd <dir>] [--state <dir>] [--idle <seconds>] [--key-file <path>]
-       [--codex <bin>] [--sandbox danger-full-access|workspace-write|read-only]
+const USAGE = `usage: rowboat-worker --url <harbor-url> [--agent codex|claude] [--cwd <dir>] [--state <dir>] [--idle <seconds>] [--key-file <path>]
+  --agent codex: [--codex <bin>] [--sandbox danger-full-access|workspace-write|read-only]
+  --agent claude: [--claude <bin>] [--model <name>] [--system-prompt-file <path>] [--permission-mode <mode>]
+       [--max-concurrent <turns>] [--turn-timeout <seconds>]
   The agent's key: ROWBOAT_AGENT_KEY in the environment, or --key-file.
+  --address: the host links are written on, when --url is an internal one.
   --idle: exit after this many seconds with nothing to do (a box that should sleep); unset runs until stopped.`;
 
 function parseArgs(argv: string[]): Record<string, string> {
@@ -53,27 +58,39 @@ async function main(): Promise<void> {
     process.exit(2);
   }
   const agent = args.agent ?? 'codex';
-  if (agent !== 'codex') {
-    console.error(`this worker runs codex only for now, not ${agent}`);
+  if (agent !== 'codex' && agent !== 'claude') {
+    console.error(`this worker runs codex or claude, not ${agent}`);
     process.exit(2);
   }
   const cwd = args.cwd ?? process.cwd();
   const stateDir = args.state ?? join(homedir(), '.rowboat', 'worker');
   const idleMs = args.idle ? Number(args.idle) * 1000 : undefined;
   const sandbox = args.sandbox as 'danger-full-access' | 'workspace-write' | 'read-only' | undefined;
-  const runtime = new CodexRuntime({
-    orgUrl: args.url,
-    agentKey: key,
-    cwd,
-    log,
-    ...(args.codex ? { command: args.codex } : {}),
-    ...(sandbox ? { sandbox } : {}),
-  });
+  const connection = { orgUrl: args.url, agentKey: key, log };
+  const runtime: Runtime =
+    agent === 'claude'
+      ? new ClaudeRuntime({
+          ...connection,
+          stateDir,
+          ...(args.claude ? { command: args.claude } : {}),
+          ...(args.model ? { defaultModel: args.model } : {}),
+          ...(args['system-prompt-file'] ? { appendSystemPromptFile: args['system-prompt-file'] } : {}),
+          ...(args['permission-mode'] ? { permissionMode: args['permission-mode'] } : {}),
+          ...(args['max-concurrent'] ? { maxConcurrent: Number(args['max-concurrent']) } : {}),
+          ...(args['turn-timeout'] ? { turnTimeoutMs: Number(args['turn-timeout']) * 1000 } : {}),
+        })
+      : new CodexRuntime({
+          ...connection,
+          cwd,
+          ...(args.codex ? { command: args.codex } : {}),
+          ...(sandbox ? { sandbox } : {}),
+        });
   const worker = new Worker({
     baseUrl: args.url,
     key,
     cwd,
     runtime,
+    ...(args.address ? { address: args.address } : {}),
     state: new ThreadState(join(stateDir, 'threads.json')),
     log,
     ...(idleMs ? { idleMs, onIdle: () => process.exit(0) } : {}),
