@@ -3,6 +3,7 @@ import type { z } from 'zod';
 import {
   routes,
   type Approval,
+  type ClientFrame,
   type ConnectorCapabilities,
   type Invocation,
   type InvocationUpdate,
@@ -111,6 +112,12 @@ export class HarborClient {
     return { root: page.root, messages: page.messages };
   }
 
+  /** The ids of the spaces the agent is in, its DMs among them. */
+  async spaceIds(): Promise<string[]> {
+    const body = await this.request('GET', `${routes.listSpaces.path}?includeDirect=true`);
+    return routes.listSpaces.response.parse(body).spaces.map((s) => s.id);
+  }
+
   async roster(): Promise<Member[]> {
     return routes.listContacts.response.parse(await this.request('GET', routes.listContacts.path)).members;
   }
@@ -177,6 +184,13 @@ export class HarborLive {
       }
     }, this.opts.watchdogMs ?? DEFAULT_WATCHDOG_MS);
     this.watchdog.unref?.();
+  }
+
+  /** Write a frame when the socket is open; resolves once it is written, or at once when it cannot be. */
+  send(frame: ClientFrame): Promise<void> {
+    const ws = this.ws;
+    if (!ws || this.status !== 'open') return Promise.resolve();
+    return new Promise((resolve) => ws.send(JSON.stringify(frame), () => resolve()));
   }
 
   close(): void {

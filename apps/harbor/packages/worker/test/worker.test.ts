@@ -2,6 +2,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import WebSocket from 'ws';
 import { PgStore, pgliteDb, startHarbor, type RunningHarbor } from '@rowboat/harbor';
 import type { Invocation, Member, Message } from '@rowboat/spaces-protocol';
 import { silentLogger } from '../src/log.js';
@@ -158,6 +159,28 @@ afterAll(async () => {
 });
 
 describe('the worker', () => {
+  it('shows the agent as here in its spaces while it runs, and away when it stops', async () => {
+    const watcher = new WebSocket(`${harbor.url.replace(/^http/, 'ws')}/v1/live?token=dev-harsh`);
+    const states: string[] = [];
+    let subscribed = false;
+    watcher.on('message', (data) => {
+      const frame = JSON.parse(String(data));
+      if (frame.kind === 'subscribed') subscribed = true;
+      if (frame.kind === 'presence' && frame.memberId === agent.id) states.push(frame.state);
+    });
+    await new Promise((resolve) => watcher.once('open', resolve));
+    watcher.send(JSON.stringify({ kind: 'subscribe', spaceId }));
+    await until(() => subscribed || undefined, 'the subscription');
+    try {
+      const worker = await startWorker(new FakeRuntime(), { presenceMs: 50 });
+      await until(() => (states.filter((s) => s === 'viewing').length >= 2 ? true : undefined), 'a repeated heartbeat');
+      await worker.stop();
+      await until(() => (states.at(-1) === 'idle' ? true : undefined), 'the goodbye');
+    } finally {
+      watcher.close();
+    }
+  });
+
   it('answers a mention: acknowledges, runs the turn with the request in its prompt, posts the reply, reports done', async () => {
     const runtime = new FakeRuntime();
     await startWorker(runtime);

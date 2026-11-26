@@ -1,6 +1,6 @@
 # @rowboat/worker
 
-The worker that runs beside an agent's harness and carries Harbor's invocations to it (SPEC.md §8 Connectors, *the agent worker*; the plan is `plans/agent-worker-v1.md` in Main). It is a client of the agent contract on the agent's own key, like the echo example and the Hermes plugin: told live when the agent is invoked, listing every minute, acknowledging, running each conversation's turns one after another through the harness, reporting what it does, posting the answer, reporting done. It declares Stop, and steering when the harness can take input mid-turn. Codex is the first harness, through `codex app-server`; Claude Code runs as one `claude --print` process per turn.
+The worker that runs beside an agent's harness and carries Harbor's invocations to it (SPEC.md §8 Connectors, *the agent worker*; the plan is `plans/agent-worker-v1.md` in Main). It is a client of the agent contract on the agent's own key, like the echo example and the Hermes plugin: told live when the agent is invoked, listing every minute, acknowledging, running each conversation's turns one after another through the harness, reporting what it does, posting the answer, reporting done. While connected it shows the agent as here in each of its spaces. It declares Stop, and steering when the harness can take input mid-turn. Codex is the first harness, through `codex app-server`; Claude Code runs as one `claude --print` process per turn.
 
 ```
 rowboat-worker --url https://org.example --cwd /data/workspace --state /data/rowboat/worker --idle 600

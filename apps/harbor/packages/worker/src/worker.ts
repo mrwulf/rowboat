@@ -21,6 +21,8 @@ const HEARTBEAT_MS = 5 * 60_000;
 /** Activity lines no faster than this; the latest always lands. */
 const ACTIVITY_MIN_MS = 5_000;
 const IDLE_CHECK_MS = 15_000;
+/** A space shows the agent as here for 45 s after it last said so; people's apps say it every 20 s. */
+const PRESENCE_MS = 20_000;
 const MAX_BODY = 65_536;
 const MAX_ACTIVITY = 200;
 
@@ -40,6 +42,7 @@ export interface WorkerOptions {
   heartbeatMs?: number;
   activityMinMs?: number;
   idleCheckMs?: number;
+  presenceMs?: number;
   live?: { staleAfterMs?: number; watchdogMs?: number };
 }
 
@@ -64,6 +67,8 @@ export class Worker {
   private readonly taken = new Set<string>();
   private readonly timers: Array<ReturnType<typeof setInterval>> = [];
   private lastBusy = Date.now();
+  /** The spaces last told the agent is here, to tell them when it leaves. */
+  private presentIn: string[] = [];
   private stopped = false;
   agentId = '';
   private agentName = '';
@@ -80,6 +85,7 @@ export class Worker {
       onOpen: () => {
         opts.log('connected to Harbor');
         void this.sweep();
+        void this.showPresence();
       },
       onClose: () => opts.log('disconnected from Harbor; reconnecting'),
       ...opts.live,
@@ -101,18 +107,40 @@ export class Worker {
     await this.sweep();
     this.timers.push(setInterval(() => void this.sweep(), this.opts.sweepMs ?? SWEEP_MS));
     this.timers.push(setInterval(() => this.checkIdle(), this.opts.idleCheckMs ?? IDLE_CHECK_MS));
+    this.timers.push(setInterval(() => void this.showPresence(), this.opts.presenceMs ?? PRESENCE_MS));
     for (const t of this.timers) t.unref?.();
   }
 
   async stop(): Promise<void> {
     this.stopped = true;
     for (const t of this.timers) clearInterval(t);
+    // Away at once, rather than when the last word expires.
+    await Promise.all(this.presentIn.map((spaceId) => this.live.send({ kind: 'presence', spaceId, state: 'idle' })));
     this.live.close();
     for (const turn of this.running.values()) {
       if (turn.trailing) clearTimeout(turn.trailing);
       await turn.handle?.interrupt().catch(() => {});
     }
     await this.opts.runtime.stop();
+  }
+
+  /**
+   * Here in every space the agent is in while the worker is connected to take
+   * its turns; a worker that is gone stops saying so, and the agent shows away.
+   */
+  private async showPresence(): Promise<void> {
+    if (this.stopped || this.live.status !== 'open') return;
+    let spaceIds: string[];
+    try {
+      spaceIds = await this.harbor.spaceIds();
+    } catch (err) {
+      this.opts.log('could not list spaces for presence', { error: errorText(err) });
+      return;
+    }
+    // Stopped while listing: stop() has said goodbye, and nothing may say hello after it.
+    if (this.stopped) return;
+    this.presentIn = spaceIds;
+    for (const spaceId of spaceIds) void this.live.send({ kind: 'presence', spaceId, state: 'viewing' });
   }
 
   /** The composer's options, once the harness has listed its models; Stop and steer were declared first. */
